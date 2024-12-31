@@ -56,11 +56,8 @@ mod app {
     const SYST_MONO_FACTOR: u32 = 10;
 
     // delay in miliseconds
-    const DELAY_MS: u32 = SYST_MONO_FACTOR * 100;      // 100 ms delay
+    const DELAY_MS: u32 = SYST_MONO_FACTOR * 150;      // delay in ms
     const LONG_DELAY: u32 = SYST_MONO_FACTOR * 5000;  // 5 s delay
-
-    // FREQUENCY for LoRa
-    const FREQUENCY: i64 = 915;
 
     // timer stuff
     const GPT1_FREQUENCY: u32 = 1_000;
@@ -71,7 +68,7 @@ mod app {
     // this simplifies local and shared resource definitions
     type Led = gpio::Output<P6>;
     type Delay = Blocking<Gpt1, GPT1_FREQUENCY>;
-    type Fpga = FPGA<board::Lpspi4, P15, gpio::Output<P16>, P14>;
+    type Fpga = FPGA<board::Lpspi4, gpio::Output<P9>, P15, gpio::Output<P16>, P14>;
 
     // struct that holds local resources which can be accessed via the context
     #[local]
@@ -128,6 +125,7 @@ mod app {
         let counter = 0;
 
         // initalize spi
+        // use pin 9 as chop select manially :) maybe it'll fix the issue???
         let mut spi = board::lpspi(lpspi4, 
             board::LpspiPins {
                 pcs0: pins.p10,
@@ -137,7 +135,9 @@ mod app {
             }, 
             FPGA_SPI_FREQUENCY);
         
-        
+        // custom CS pin to test. Maybe self asserted pcs = pin.10 is not working as intended
+        let cs = gpio2.output(pins.p9);
+
         // configure SPI
         spi.disabled(|spi| {
             spi.set_mode(FPGA_SPI_MODE);
@@ -153,7 +153,7 @@ mod app {
         
         let done = gpio1.input(pins.p14);
 
-        let fpga = match FPGA::new(spi, init_b, prog_b, done) {
+        let fpga = match FPGA::new(spi, cs, init_b, prog_b, done) {
             Ok(instance) => instance,
             Err(_) => panic!("Couldn't initialize instance of FPGA"),
         };
@@ -210,11 +210,13 @@ mod app {
         let fpga = cx.local.fpga;
         let delay = cx.local.delay;
         Systick::delay(LONG_DELAY.millis()).await;
+
         // attempt to configure the fpga :)
         match fpga.configure(delay) {
             Ok(_) => log::info!("Configuration worked???"),
             Err(e) => match e {
                 FpgaError::SPI(spi_e) => panic!("SPI error with info: {:?}", spi_e),
+                FpgaError::CSPin(cs_e) => panic!("CS pin error: {:?}", cs_e), 
                 FpgaError::InitPin(init_e) => panic!("Init pin error: {:?}", init_e),
                 FpgaError::ProgPin(prog_e) => panic!("Prog pin error: {:?}", prog_e),
                 FpgaError::DonePin(done_e) => panic!("Done pin error: {:?}", done_e),
@@ -222,34 +224,61 @@ mod app {
             },
         };
 
+        Systick::delay(DELAY_MS.millis()).await;
+
         let mut duty_cycles = [DutyCycle::from(0 as i16), 
                         DutyCycle::from(0 as i16), 
                         DutyCycle::from(0 as i16),
                         DutyCycle::from(0 as i16),
-                        DutyCycle::from(64 as i16)];
+                        DutyCycle::from(0 as i16)];
 
-        log::info!("tried to write to motor :), will it work???");
+        log::info!("delay has been set to: {} ms", DELAY_MS / SYST_MONO_FACTOR);
         
-        match fpga.motors_en(true){
-            Ok(status) => log::info!("fpga status: {:b}", status),
-            Err(e) => panic!("error enabling motors... {:?}", e),
-        };
+        // // enable motors
+        // match fpga.motors_en(true){
+        //     Ok(status) => log::info!(" enabled motors fpga status: {:b}", status),
+        //     Err(e) => panic!("error enabling motors... {:?}", e),
+        // };
+        // Systick::delay(DELAY_MS.millis()).await;        
+
+        // // let's try to get and print the git hash?
+        // let mut gitHash: [u8;20] = [0;20];
+        // match fpga.get_git_hash(&mut gitHash, delay) {
+        //     Ok(dirty) => {
+        //         log::info!("got git hash!");
+        //         for i in 0..20 {
+        //             log::info!("{}: {:X}", i, gitHash[i]);
+        //         }
+        //         log::info!("dirty is: {}", dirty);
+        //     },
+        //     Err(e) => panic!("eror reading git hash {:?}", e),
+        // }
 
         loop {
-            
+            // enable motors
+            match fpga.motors_en(true){
+                Ok(status) => log::info!(" enabled motors fpga status: {:b}", status),
+                Err(e) => panic!("error enabling motors... {:?}", e),
+            };
+            Systick::delay(DELAY_MS.millis()).await;
+
+            // write duty cycle
             match fpga.set_duty_cycles(&mut duty_cycles) {
                 Ok(status) => {
-                    log::info!("wrote duty cycles fpga status: {:b}", status[0]);
-                    let dt = status[1] * 2 * 128 * (1 / 18432000);
-                    log::info!("delta value is: {}", dt);
+                    log::info!("wrote duty cycles fpga status: {:b}", status);
+                    //let dt: f32 = (status[1] as f32) * 2.0 * 128.0 * (1.0 / 18432000.0);
+                    //log::info!("delta value is: {}", dt);
                 },
                 Err(e) => panic!("error writing duty cycles... {:?}", e),
             };
-
-            // calcualte the returning value of the encoded delta?
-            
-
             Systick::delay(DELAY_MS.millis()).await;
+
+            // // disable motors
+            // match fpga.motors_en(false){
+            //     Ok(status) => log::info!("disabled motors fpga status: {:b}", status),
+            //     Err(e) => panic!("error enabling motors... {:?}", e),
+            // };
+            // Systick::delay(DELAY_MS.millis()).await;
         }
     }
 }

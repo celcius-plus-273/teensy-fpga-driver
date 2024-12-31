@@ -1,0 +1,3 @@
+cargo:rustc-link-search=/Users/kh/robocup/teensy-fpga-driver/target/thumbv7em-none-eabihf/debug/build/imxrt-ral-4e98430b6f7d8705/out
+cargo:rerun-if-changed=src/imxrt1062.x
+cargo:rerun-if-changed=build.rs

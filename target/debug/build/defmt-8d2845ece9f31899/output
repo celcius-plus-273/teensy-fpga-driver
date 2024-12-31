@@ -1,0 +1,1 @@
+cargo:rustc-link-search=/Users/kh/robocup/teensy-fpga-driver/target/debug/build/defmt-8d2845ece9f31899/out
